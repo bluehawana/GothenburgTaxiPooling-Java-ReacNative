@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(mvn:*)",
+      "Bash(npm install)",
+      "Bash(npm start)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(chmod:*)",
+      "Bash(npx vite:*)",
+      "Bash(rm:*)",
+      "Bash(npm install:*)",
+      "Bash(xcrun simctl list:*)",
+      "Bash(open:*)",
+      "Bash(xcrun simctl create:*)",
+      "Bash(expo start:*)",
+      "Bash(npx expo start:*)",
+      "Bash(npx expo install:*)",
+      "Bash(/Users/bluehawana/Projects/Taxi/test-ios-apps.sh:*)"
+    ],
+    "deny": []
+  }
+}

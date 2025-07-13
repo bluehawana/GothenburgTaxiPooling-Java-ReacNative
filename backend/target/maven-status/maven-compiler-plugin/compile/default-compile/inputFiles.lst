@@ -1,0 +1,14 @@
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/repository/SharedTripRepository.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/dto/TripRequestDto.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/entity/SharedTrip.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/config/SecurityConfig.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/service/TripRequestService.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/entity/TripRequest.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/controller/HomeController.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/controller/TripController.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/TaxiCarpoolingApplication.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/service/MatchmakingService.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/repository/TripRequestRepository.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/entity/User.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/entity/SharedTripRepository.java
+/Users/bluehawana/Projects/Taxi/backend/src/main/java/se/gothenburg/taxicarpooling/repository/UserRepository.java
