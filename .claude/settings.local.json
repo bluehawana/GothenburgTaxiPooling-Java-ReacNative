@@ -17,7 +17,10 @@
       "Bash(expo start:*)",
       "Bash(npx expo start:*)",
       "Bash(npx expo install:*)",
-      "Bash(/Users/bluehawana/Projects/Taxi/test-ios-apps.sh:*)"
+      "Bash(/Users/bluehawana/Projects/Taxi/test-ios-apps.sh:*)",
+      "Bash(mv:*)",
+      "Bash(npx create-expo-app:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

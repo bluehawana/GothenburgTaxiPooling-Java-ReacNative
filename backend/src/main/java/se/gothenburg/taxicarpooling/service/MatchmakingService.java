@@ -3,6 +3,10 @@ package se.gothenburg.taxicarpooling.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import se.gothenburg.taxicarpooling.entity.TripRequest;
 import se.gothenburg.taxicarpooling.entity.SharedTrip;
 import se.gothenburg.taxicarpooling.repository.TripRequestRepository;
@@ -27,6 +31,11 @@ public class MatchmakingService {
     
     @Value("${government.cost.per.shared.trip}")
     private BigDecimal costPerSharedTrip;
+    
+    @Value("${realtime.service.url:http://localhost:3001}")
+    private String realtimeServiceUrl;
+    
+    private RestTemplate restTemplate = new RestTemplate();
     
     private static final double MAX_PICKUP_DISTANCE_KM = 2.0;
     private static final double MAX_DESTINATION_DISTANCE_KM = 2.0;
@@ -103,9 +112,8 @@ public class MatchmakingService {
     
     private boolean isTimeCompatible(TripRequest trip1, TripRequest trip2) {
         long timeDifference = Math.abs(
-            trip1.getRequestedPickupTime().toEpochSecond(null) - 
-            trip2.getRequestedPickupTime().toEpochSecond(null)
-        ) / 60;
+            java.time.Duration.between(trip1.getRequestedPickupTime(), trip2.getRequestedPickupTime()).toMinutes()
+        );
         return timeDifference <= MAX_TIME_DIFFERENCE_MINUTES;
     }
     
@@ -156,6 +164,48 @@ public class MatchmakingService {
             trip.setStatus(TripRequest.TripStatus.MATCHED);
             trip.setEstimatedCost(costPerSharedTrip.divide(BigDecimal.valueOf(tripRequests.size())));
             tripRequestRepository.save(trip);
+        }
+        
+        // Notify real-time service about the new shared trip
+        notifyRealtimeService(sharedTrip, tripRequests);
+    }
+    
+    private void notifyRealtimeService(SharedTrip sharedTrip, List<TripRequest> tripRequests) {
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("sharedTripId", sharedTrip.getId());
+            payload.put("status", "MATCHED");
+            payload.put("passengerCount", sharedTrip.getPassengerCount());
+            
+            List<Map<String, Object>> tripData = tripRequests.stream()
+                .map(trip -> {
+                    Map<String, Object> tripInfo = new HashMap<>();
+                    tripInfo.put("tripId", trip.getId());
+                    tripInfo.put("userId", trip.getUser().getId());
+                    tripInfo.put("pickupAddress", trip.getPickupAddress());
+                    tripInfo.put("destinationAddress", trip.getDestinationAddress());
+                    tripInfo.put("pickupLatitude", trip.getPickupLatitude());
+                    tripInfo.put("pickupLongitude", trip.getPickupLongitude());
+                    tripInfo.put("destinationLatitude", trip.getDestinationLatitude());
+                    tripInfo.put("destinationLongitude", trip.getDestinationLongitude());
+                    tripInfo.put("requestedPickupTime", trip.getRequestedPickupTime());
+                    tripInfo.put("passengerCount", trip.getPassengerCount());
+                    tripInfo.put("needsWheelchairAccess", trip.isNeedsWheelchairAccess());
+                    tripInfo.put("needsAssistance", trip.isNeedsAssistance());
+                    return tripInfo;
+                })
+                .collect(Collectors.toList());
+            
+            payload.put("trips", tripData);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+            
+            restTemplate.postForObject(realtimeServiceUrl + "/api/shared-trip-created", request, String.class);
+            
+        } catch (Exception e) {
+            System.err.println("Failed to notify real-time service: " + e.getMessage());
         }
     }
 }

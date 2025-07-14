@@ -16,6 +16,7 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
 // Add a root route
 app.get('/', (req, res) => {
@@ -24,7 +25,9 @@ app.get('/', (req, res) => {
     <p>Service is running on port 3001</p>
     <ul>
       <li><a href="/api/active-drivers">Active Drivers</a></li>
+      <li><a href="/api/shared-trips">Shared Trips</a></li>
       <li><a href="/status">Service Status</a></li>
+      <li><a href="/dashboard.html">Management Dashboard</a></li>
     </ul>
   `);
 });
@@ -35,6 +38,7 @@ app.get('/status', (req, res) => {
     status: 'running',
     activeDrivers: activeDrivers.size,
     activeTrips: activeTrips.size,
+    sharedTrips: sharedTrips.size,
     connectedPassengers: passengerSockets.size
   });
 });
@@ -43,6 +47,7 @@ const SPRING_BOOT_API = process.env.SPRING_BOOT_API || 'http://localhost:8081';
 
 const activeDrivers = new Map();
 const activeTrips = new Map();
+const sharedTrips = new Map();
 const passengerSockets = new Map();
 
 io.on('connection', (socket) => {
@@ -65,20 +70,84 @@ io.on('connection', (socket) => {
   
   socket.on('location-update', (data) => {
     if (activeDrivers.has(data.driverId)) {
-      activeDrivers.get(data.driverId).location = data.location;
+      const driver = activeDrivers.get(data.driverId);
+      driver.location = data.location;
+      driver.lastLocationUpdate = new Date();
       
+      // Broadcast to all management dashboards
       socket.broadcast.emit('driver-location-update', {
         driverId: data.driverId,
         location: data.location,
+        status: driver.status,
+        vehicleInfo: driver.vehicleInfo,
         timestamp: new Date()
       });
       
+      // Update trip progress for assigned trips
       updateTripProgress(data.driverId, data.location);
+      
+      // If driver is in a shared trip, update all passengers
+      for (let [sharedTripId, sharedTrip] of sharedTrips.entries()) {
+        if (sharedTrip.assignedDriverId === data.driverId && sharedTrip.status === 'ASSIGNED') {
+          sharedTrip.trips.forEach(trip => {
+            const passengerSocket = passengerSockets.get(trip.userId);
+            if (passengerSocket) {
+              io.to(passengerSocket).emit('driver-location-update', {
+                sharedTripId: sharedTripId,
+                driverId: data.driverId,
+                location: data.location,
+                timestamp: new Date()
+              });
+            }
+          });
+        }
+      }
     }
   });
   
   socket.on('trip-status-update', (data) => {
     updateTripStatus(data.tripId, data.status, data.driverId);
+  });
+  
+  socket.on('shared-trip-accept', (data) => {
+    const { sharedTripId, driverId } = data;
+    
+    if (sharedTrips.has(sharedTripId)) {
+      const sharedTrip = sharedTrips.get(sharedTripId);
+      sharedTrip.status = 'ASSIGNED';
+      sharedTrip.assignedDriverId = driverId;
+      sharedTrip.assignedAt = new Date();
+      
+      // Update driver status
+      if (activeDrivers.has(driverId)) {
+        activeDrivers.get(driverId).status = 'busy';
+      }
+      
+      // Notify passengers that driver has been assigned
+      sharedTrip.trips.forEach(trip => {
+        const passengerSocket = passengerSockets.get(trip.userId);
+        if (passengerSocket) {
+          io.to(passengerSocket).emit('driver-assigned', {
+            sharedTripId: sharedTripId,
+            driverId: driverId,
+            driverInfo: activeDrivers.get(driverId)?.vehicleInfo,
+            estimatedArrival: 'Calculating...'
+          });
+        }
+      });
+      
+      // Notify other drivers that this trip is no longer available
+      const otherDrivers = Array.from(activeDrivers.entries())
+        .filter(([id, data]) => id !== driverId && data.status === 'available');
+      
+      otherDrivers.forEach(([otherDriverId, driverData]) => {
+        io.to(driverData.socketId).emit('shared-trip-taken', {
+          sharedTripId: sharedTripId
+        });
+      });
+      
+      console.log(`Driver ${driverId} accepted shared trip ${sharedTripId}`);
+    }
   });
   
   socket.on('passenger-pickup-confirmed', (data) => {
@@ -198,6 +267,50 @@ app.get('/api/active-drivers', (req, res) => {
   }));
   
   res.json(drivers);
+});
+
+app.post('/api/shared-trip-created', (req, res) => {
+  const { sharedTripId, trips, passengerCount } = req.body;
+  
+  console.log(`New shared trip created: ${sharedTripId} with ${passengerCount} passengers`);
+  
+  sharedTrips.set(sharedTripId, {
+    id: sharedTripId,
+    trips: trips,
+    passengerCount: passengerCount,
+    status: 'PENDING_DRIVER_ASSIGNMENT',
+    createdAt: new Date()
+  });
+  
+  // Notify all active drivers about the new shared trip
+  const availableDrivers = Array.from(activeDrivers.entries())
+    .filter(([id, data]) => data.status === 'available');
+  
+  availableDrivers.forEach(([driverId, driverData]) => {
+    io.to(driverData.socketId).emit('shared-trip-available', {
+      sharedTripId: sharedTripId,
+      trips: trips,
+      passengerCount: passengerCount,
+      estimatedEarning: 800, // Government rate for shared trips
+      pickupAddresses: trips.map(trip => trip.pickupAddress),
+      destinationAddresses: trips.map(trip => trip.destinationAddress)
+    });
+  });
+  
+  res.json({ success: true, notifiedDrivers: availableDrivers.length });
+});
+
+app.get('/api/shared-trips', (req, res) => {
+  const trips = Array.from(sharedTrips.values()).map(trip => ({
+    id: trip.id,
+    passengerCount: trip.passengerCount,
+    status: trip.status,
+    createdAt: trip.createdAt,
+    pickupAddresses: trip.trips.map(t => t.pickupAddress),
+    destinationAddresses: trip.trips.map(t => t.destinationAddress)
+  }));
+  
+  res.json(trips);
 });
 
 const PORT = process.env.PORT || 3001;

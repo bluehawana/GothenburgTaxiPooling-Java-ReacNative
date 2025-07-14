@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Göteborg Taxi - Management Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #1f2937;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2563eb;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-top: 5px;
+        }
+
+        .driver-item, .trip-item {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #10b981;
+        }
+
+        .driver-item.busy {
+            border-left-color: #f59e0b;
+        }
+
+        .driver-item.offline {
+            border-left-color: #ef4444;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-available {
+            background: #dcfce7;
+            color: #16a34a;
+        }
+
+        .status-busy {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .status-offline {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .trip-matched {
+            border-left-color: #3b82f6;
+        }
+
+        .trip-assigned {
+            border-left-color: #f59e0b;
+        }
+
+        .trip-completed {
+            border-left-color: #10b981;
+        }
+
+        .location-info {
+            font-size: 0.9rem;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        .last-update {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-top: 10px;
+        }
+
+        .refresh-button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+
+        .refresh-button:hover {
+            background: #1d4ed8;
+        }
+
+        .scrollable {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .cost-savings {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .cost-savings h3 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        .cost-savings p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚖 Göteborg Taxi Management Dashboard</h1>
+        <p>Real-time monitoring för äldre, funktionsnedsatta och patienttransporter</p>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-number" id="active-drivers">0</div>
+            <div class="stat-label">Aktiva förare</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="shared-trips">0</div>
+            <div class="stat-label">Delade resor</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="connected-passengers">0</div>
+            <div class="stat-label">Anslutna passagerare</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="cost-savings">0</div>
+            <div class="stat-label">Besparingar (SEK)</div>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <div class="card">
+            <h2>📍 Aktiva förare & positioner</h2>
+            <button class="refresh-button" onclick="refreshDrivers()">Uppdatera</button>
+            <div id="drivers-list" class="scrollable">
+                <p>Laddar förare...</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🚖 Delade resor</h2>
+            <button class="refresh-button" onclick="refreshTrips()">Uppdatera</button>
+            <div id="trips-list" class="scrollable">
+                <p>Laddar resor...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let drivers = new Map();
+        let sharedTrips = new Map();
+        let stats = {
+            activeDrivers: 0,
+            sharedTrips: 0,
+            connectedPassengers: 0,
+            costSavings: 0
+        };
+
+        // Socket event listeners
+        socket.on('driver-location-update', (data) => {
+            if (drivers.has(data.driverId)) {
+                const driver = drivers.get(data.driverId);
+                driver.location = data.location;
+                driver.lastUpdate = new Date();
+                updateDriversDisplay();
+            }
+        });
+
+        socket.on('shared-trip-created', (data) => {
+            console.log('New shared trip:', data);
+            refreshTrips();
+        });
+
+        // API functions
+        async function fetchDrivers() {
+            try {
+                const response = await fetch('/api/active-drivers');
+                const driversData = await response.json();
+                
+                drivers.clear();
+                driversData.forEach(driver => {
+                    drivers.set(driver.driverId, {
+                        ...driver,
+                        lastUpdate: new Date()
+                    });
+                });
+                
+                updateDriversDisplay();
+                updateStats();
+            } catch (error) {
+                console.error('Error fetching drivers:', error);
+            }
+        }
+
+        async function fetchTrips() {
+            try {
+                const response = await fetch('/api/shared-trips');
+                const tripsData = await response.json();
+                
+                sharedTrips.clear();
+                tripsData.forEach(trip => {
+                    sharedTrips.set(trip.id, trip);
+                });
+                
+                updateTripsDisplay();
+                updateStats();
+            } catch (error) {
+                console.error('Error fetching trips:', error);
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const response = await fetch('/status');
+                const statusData = await response.json();
+                
+                stats.activeDrivers = statusData.activeDrivers;
+                stats.sharedTrips = statusData.sharedTrips;
+                stats.connectedPassengers = statusData.connectedPassengers;
+                
+                updateStats();
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+
+        // Display functions
+        function updateDriversDisplay() {
+            const driversContainer = document.getElementById('drivers-list');
+            
+            if (drivers.size === 0) {
+                driversContainer.innerHTML = '<p>Inga aktiva förare</p>';
+                return;
+            }
+            
+            const driversHTML = Array.from(drivers.values()).map(driver => {
+                const statusClass = driver.status === 'available' ? 'status-available' : 
+                                   driver.status === 'busy' ? 'status-busy' : 'status-offline';
+                                   
+                const driverClass = driver.status === 'available' ? '' : 
+                                   driver.status === 'busy' ? 'busy' : 'offline';
+                
+                return `
+                    <div class="driver-item ${driverClass}">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>Förare ${driver.driverId}</strong>
+                                <span class="status-badge ${statusClass}">${driver.status}</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <div>${driver.vehicleInfo?.licensePlate || 'N/A'}</div>
+                                <div style="font-size: 0.8rem; color: #6b7280;">
+                                    ${driver.vehicleInfo?.make} ${driver.vehicleInfo?.model}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="location-info">
+                            📍 Position: ${driver.location ? 
+                                `${driver.location.latitude.toFixed(4)}, ${driver.location.longitude.toFixed(4)}` : 
+                                'Okänd'}
+                        </div>
+                        <div class="last-update">
+                            Senast uppdaterad: ${driver.lastUpdate ? 
+                                driver.lastUpdate.toLocaleTimeString('sv-SE') : 'N/A'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            driversContainer.innerHTML = driversHTML;
+        }
+
+        function updateTripsDisplay() {
+            const tripsContainer = document.getElementById('trips-list');
+            
+            if (sharedTrips.size === 0) {
+                tripsContainer.innerHTML = '<p>Inga delade resor</p>';
+                return;
+            }
+            
+            const tripsHTML = Array.from(sharedTrips.values()).map(trip => {
+                const statusClass = trip.status === 'PENDING_DRIVER_ASSIGNMENT' ? 'trip-matched' : 
+                                   trip.status === 'ASSIGNED' ? 'trip-assigned' : 'trip-completed';
+                
+                return `
+                    <div class="trip-item ${statusClass}">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>Delad resa ${trip.id}</strong>
+                                <span class="status-badge ${statusClass}">${trip.status}</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <div>👥 ${trip.passengerCount} passagerare</div>
+                                <div style="font-size: 0.8rem; color: #6b7280;">800 SEK</div>
+                            </div>
+                        </div>
+                        <div class="location-info">
+                            📍 Upphämtningar: ${trip.pickupAddresses ? trip.pickupAddresses.join(', ') : 'Laddar...'}
+                        </div>
+                        <div class="location-info">
+                            🏁 Destinationer: ${trip.destinationAddresses ? trip.destinationAddresses.join(', ') : 'Laddar...'}
+                        </div>
+                        <div class="last-update">
+                            Skapad: ${new Date(trip.createdAt).toLocaleString('sv-SE')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            tripsContainer.innerHTML = tripsHTML;
+        }
+
+        function updateStats() {
+            document.getElementById('active-drivers').textContent = stats.activeDrivers;
+            document.getElementById('shared-trips').textContent = stats.sharedTrips;
+            document.getElementById('connected-passengers').textContent = stats.connectedPassengers;
+            
+            // Calculate cost savings (assuming 650 SEK per individual trip vs 800 SEK shared)
+            const individualCost = stats.sharedTrips * 650 * 2; // Assuming average 2 passengers per shared trip
+            const sharedCost = stats.sharedTrips * 800;
+            const savings = individualCost - sharedCost;
+            document.getElementById('cost-savings').textContent = savings > 0 ? savings : 0;
+        }
+
+        // Refresh functions
+        function refreshDrivers() {
+            fetchDrivers();
+        }
+
+        function refreshTrips() {
+            fetchTrips();
+        }
+
+        // Initialize
+        function init() {
+            fetchDrivers();
+            fetchTrips();
+            fetchStats();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                fetchDrivers();
+                fetchTrips();
+                fetchStats();
+            }, 30000);
+        }
+
+        // Start the dashboard
+        init();
+    </script>
+</body>
+</html>

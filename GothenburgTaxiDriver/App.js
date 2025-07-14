@@ -24,6 +24,7 @@ export default function DriverApp() {
   const [assignedTrips, setAssignedTrips] = useState([]);
   const [socket, setSocket] = useState(null);
   const [earnings, setEarnings] = useState({ today: 0, trips: 0 });
+  const [acceptingTrips, setAcceptingTrips] = useState(new Set()); // Track accepting trips
 
   useEffect(() => {
     (async () => {
@@ -44,6 +45,35 @@ export default function DriverApp() {
     newSocket.on('trip-assignment', (tripData) => {
       Alert.alert('Ny resa tilldelad!', `Du har fått en ny delad resa med ${tripData.passengers.length} passagerare.`);
       setAssignedTrips(prev => [...prev, tripData]);
+    });
+
+    newSocket.on('shared-trip-available', (sharedTripData) => {
+      Alert.alert(
+        'Ny delad resa tillgänglig!', 
+        `${sharedTripData.passengerCount} passagerare, ${sharedTripData.estimatedEarning} SEK`,
+        [
+          { text: 'Avvisa', style: 'cancel' },
+          { 
+            text: 'Acceptera', 
+            onPress: () => acceptSharedTrip(sharedTripData.sharedTripId)
+          }
+        ]
+      );
+      
+      // Add to available trips list
+      setAssignedTrips(prev => [...prev, {
+        tripId: sharedTripData.sharedTripId,
+        isSharedTrip: true,
+        passengers: sharedTripData.trips || [],
+        estimatedEarning: sharedTripData.estimatedEarning,
+        pickupAddresses: sharedTripData.pickupAddresses,
+        destinationAddresses: sharedTripData.destinationAddresses
+      }]);
+    });
+
+    newSocket.on('shared-trip-taken', (data) => {
+      // Remove the trip from available trips as another driver took it
+      setAssignedTrips(prev => prev.filter(trip => trip.tripId !== data.sharedTripId));
     });
 
     return () => newSocket.close();
@@ -91,6 +121,52 @@ export default function DriverApp() {
     } else {
       Alert.alert('Status', 'Du är nu offline.');
     }
+  };
+
+  const acceptSharedTrip = (sharedTripId) => {
+    // Check if trip is already being accepted or already accepted
+    if (acceptingTrips.has(sharedTripId)) {
+      Alert.alert('Info', 'Denna resa bearbetas redan...');
+      return;
+    }
+    
+    const trip = assignedTrips.find(t => t.tripId === sharedTripId);
+    if (trip && trip.accepted) {
+      Alert.alert('Info', 'Denna resa har redan accepterats.');
+      return;
+    }
+    
+    // Add to accepting set to prevent double acceptance
+    setAcceptingTrips(prev => new Set([...prev, sharedTripId]));
+    
+    if (socket) {
+      socket.emit('shared-trip-accept', {
+        sharedTripId: sharedTripId,
+        driverId: driverId
+      });
+    }
+    
+    Alert.alert('Framgång', 'Delad resa accepterad! Navigera till första upphämtningsplatsen.');
+    setEarnings(prev => ({
+      today: prev.today + 800,
+      trips: prev.trips + 1
+    }));
+    
+    // Update trip status and remove from accepting set
+    setAssignedTrips(prev => prev.map(trip => 
+      trip.tripId === sharedTripId 
+        ? { ...trip, status: 'ASSIGNED', accepted: true }
+        : trip
+    ));
+    
+    // Remove from accepting set after a delay
+    setTimeout(() => {
+      setAcceptingTrips(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(sharedTripId);
+        return newSet;
+      });
+    }, 1000);
   };
 
   const acceptTrip = (tripId) => {
@@ -147,27 +223,64 @@ export default function DriverApp() {
   const renderTripItem = ({ item }) => (
     <View style={styles.tripCard}>
       <View style={styles.tripHeader}>
-        <Text style={styles.tripTitle}>🚖 Delad resa</Text>
-        <Text style={styles.tripEarning}>+800 SEK</Text>
+        <Text style={styles.tripTitle}>
+          {item.isSharedTrip ? '🚖 Delad resa (Automatisk matchning)' : '🚖 Delad resa'}
+        </Text>
+        <Text style={styles.tripEarning}>+{item.estimatedEarning || 800} SEK</Text>
       </View>
       
-      <Text style={styles.tripDetail}>👥 {item.passengers?.length || 2} passagerare</Text>
-      <Text style={styles.tripDetail}>📍 Upphämtning: Mölndal → Partille</Text>
+      <Text style={styles.tripDetail}>
+        👥 {item.passengers?.length || item.passengerCount || 2} passagerare
+      </Text>
+      
+      {item.isSharedTrip && item.pickupAddresses ? (
+        <View>
+          <Text style={styles.tripDetail}>📍 Upphämtningar:</Text>
+          {item.pickupAddresses.map((address, index) => (
+            <Text key={index} style={styles.tripDetail}>  • {address}</Text>
+          ))}
+          <Text style={styles.tripDetail}>🏁 Destinationer:</Text>
+          {item.destinationAddresses.map((address, index) => (
+            <Text key={index} style={styles.tripDetail}>  • {address}</Text>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.tripDetail}>📍 Upphämtning: Mölndal → Partille</Text>
+      )}
+      
       <Text style={styles.tripDetail}>⏰ Tid: {new Date().toLocaleTimeString('sv-SE')}</Text>
       
       <View style={styles.passengersList}>
         <Text style={styles.passengersTitle}>Passagerare:</Text>
-        <Text style={styles.passengerItem}>• Anna, 75 år - Mölndal Centrum</Text>
-        <Text style={styles.passengerItem}>• Erik, 68 år - Partille Station</Text>
+        {item.isSharedTrip && item.passengers?.length > 0 ? (
+          item.passengers.map((passenger, index) => (
+            <Text key={index} style={styles.passengerItem}>
+              • Passagerare {index + 1} - {passenger.pickupAddress}
+            </Text>
+          ))
+        ) : (
+          <>
+            <Text style={styles.passengerItem}>• Anna, 75 år - Mölndal Centrum</Text>
+            <Text style={styles.passengerItem}>• Erik, 68 år - Partille Station</Text>
+          </>
+        )}
       </View>
 
       <View style={styles.tripActions}>
-        <TouchableOpacity 
-          style={styles.acceptButton}
-          onPress={() => acceptTrip(item.tripId)}
-        >
-          <Text style={styles.acceptButtonText}>✅ Acceptera</Text>
-        </TouchableOpacity>
+        {!item.accepted ? (
+          <TouchableOpacity 
+            style={styles.acceptButton}
+            onPress={() => item.isSharedTrip ? acceptSharedTrip(item.tripId) : acceptTrip(item.tripId)}
+          >
+            <Text style={styles.acceptButtonText}>
+              {acceptingTrips.has(item.tripId) ? '⏳ Accepterar...' : '✅ Acceptera'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.acceptedButton}>
+            <Text style={styles.acceptedButtonText}>✅ Accepterad</Text>
+          </View>
+        )}
         
         <TouchableOpacity 
           style={styles.pickupButton}
@@ -251,8 +364,8 @@ export default function DriverApp() {
         <Text style={styles.sectionTitle}>💰 Fördelar med delad taxi</Text>
         <View style={styles.benefitsList}>
           <Text style={styles.benefitItem}>• 800 SEK för 2-3 passagerare vs 650 SEK × antal personer</Text>
-          <Text style={styles.benefitItem">• Högre intäkter per resa</Text>
-          <Text style={styles.benefitItem">• Hjälper miljön genom färre bilresor</Text>
+          <Text style={styles.benefitItem}>• Högre intäkter per resa</Text>
+          <Text style={styles.benefitItem}>• Hjälper miljön genom färre bilresor</Text>
           <Text style={styles.benefitItem}>• Automatisk matchning av passagerare</Text>
         </View>
       </View>
@@ -431,6 +544,20 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   acceptButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  acceptedButton: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 10,
+    opacity: 0.7,
+  },
+  acceptedButtonText: {
     color: 'white',
     fontWeight: 'bold',
     textAlign: 'center',

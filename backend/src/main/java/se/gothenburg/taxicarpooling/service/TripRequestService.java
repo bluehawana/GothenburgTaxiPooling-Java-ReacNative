@@ -44,7 +44,17 @@ public class TripRequestService {
         tripRequest.setSpecialRequirements(dto.getSpecialRequirements());
         tripRequest.setEstimatedCost(BigDecimal.valueOf(650));
         
-        return tripRequestRepository.save(tripRequest);
+        TripRequest savedRequest = tripRequestRepository.save(tripRequest);
+        
+        // Automatically trigger matchmaking after order creation
+        try {
+            matchmakingService.processMatchmaking();
+        } catch (Exception e) {
+            // Log error but don't fail the trip creation
+            System.err.println("Matchmaking failed for trip " + savedRequest.getId() + ": " + e.getMessage());
+        }
+        
+        return savedRequest;
     }
     
     public List<TripRequest> getUserTrips(Long userId) {
