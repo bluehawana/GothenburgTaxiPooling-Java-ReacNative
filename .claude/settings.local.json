@@ -20,7 +20,13 @@
       "Bash(/Users/bluehawana/Projects/Taxi/test-ios-apps.sh:*)",
       "Bash(mv:*)",
       "Bash(npx create-expo-app:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(curl -X POST \"http://localhost:3001/api/trip-assigned\" -H \"Content-Type: application/json\" -d '{\"\"tripId\"\":1,\"\"driverId\"\":4,\"\"passengers\"\":[1,2],\"\"pickupLocations\"\":[\"\"Test1\"\",\"\"Test2\"\"]}')",
+      "Bash(cd /Users/bluehawana/Projects/Taxi)",
+      "Bash(node test-accept-flow.js)",
+      "Bash(node:*)",
+      "Bash(pkill:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

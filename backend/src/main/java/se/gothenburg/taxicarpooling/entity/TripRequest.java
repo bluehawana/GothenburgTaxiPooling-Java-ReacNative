@@ -48,6 +48,8 @@ public class TripRequest {
     @JoinColumn(name = "assigned_driver_id")
     private User assignedDriver;
     
+    private LocalDateTime assignedAt;
+    
     @ManyToOne
     @JoinColumn(name = "shared_trip_id")
     private SharedTrip sharedTrip;
@@ -131,4 +133,7 @@ public class TripRequest {
     
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    
+    public LocalDateTime getAssignedAt() { return assignedAt; }
+    public void setAssignedAt(LocalDateTime assignedAt) { this.assignedAt = assignedAt; }
 }

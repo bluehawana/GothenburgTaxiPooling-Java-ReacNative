@@ -2,6 +2,7 @@ package se.gothenburg.taxicarpooling.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import se.gothenburg.taxicarpooling.entity.TripRequest;
 import se.gothenburg.taxicarpooling.entity.User;
 import se.gothenburg.taxicarpooling.repository.TripRequestRepository;
@@ -71,7 +72,40 @@ public class TripRequestService {
         TripRequest trip = tripRequestRepository.findById(tripId)
             .orElseThrow(() -> new RuntimeException("Trip not found"));
             
+        // Prevent duplicate assignment
+        if ("ASSIGNED".equals(status) && trip.getStatus() != TripRequest.TripStatus.PENDING) {
+            throw new RuntimeException("Trip already assigned or completed");
+        }
+        
         trip.setStatus(TripRequest.TripStatus.valueOf(status));
+        return tripRequestRepository.save(trip);
+    }
+    
+    @Transactional
+    public TripRequest assignMergedTripToDriver(Long mergedTripId, Long driverId) {
+        // Find the merged/shared trip
+        TripRequest trip = tripRequestRepository.findById(mergedTripId)
+            .orElseThrow(() -> new RuntimeException("Trip not found"));
+            
+        // Prevent duplicate acceptance - only one 800 SEK per merged order
+        if (trip.getStatus() != TripRequest.TripStatus.PENDING) {
+            throw new RuntimeException("Du har redan accepterat denna sammanslagna order");
+        }
+        
+        // Check if driver already has this merged order
+        if (trip.getAssignedDriver() != null && trip.getAssignedDriver().getId().equals(driverId)) {
+            throw new RuntimeException("Du har redan accepterat denna order (800 SEK)");
+        }
+        
+        User driver = userRepository.findById(driverId)
+            .orElseThrow(() -> new RuntimeException("Driver not found"));
+            
+        // Set the government rate for merged orders
+        trip.setStatus(TripRequest.TripStatus.ASSIGNED);
+        trip.setAssignedDriver(driver);
+        trip.setAssignedAt(LocalDateTime.now());
+        trip.setEstimatedCost(BigDecimal.valueOf(800)); // Gothenburg Kommun rate
+        
         return tripRequestRepository.save(trip);
     }
     

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Göteborg Taxi - Mock Test Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #1f2937;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .qr-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .qr-code {
+            margin: 15px 0;
+        }
+
+        .qr-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+
+        .qr-description {
+            font-size: 0.9rem;
+            color: #6b7280;
+            margin-bottom: 15px;
+        }
+
+        .qr-link {
+            display: inline-block;
+            background: #2563eb;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+
+        .qr-link:hover {
+            background: #1d4ed8;
+        }
+
+        .control-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .control-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 15px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .control-button:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .control-button.danger {
+            background: #ef4444;
+        }
+
+        .control-button.danger:hover {
+            background: #dc2626;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .status-card {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .status-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #059669;
+        }
+
+        .status-label {
+            font-size: 0.9rem;
+            color: #065f46;
+            margin-top: 5px;
+        }
+
+        .log-area {
+            background: #1f2937;
+            color: #e5e7eb;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        .patterns-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .pattern-card {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .pattern-title {
+            font-weight: bold;
+            color: #1e40af;
+            margin-bottom: 10px;
+        }
+
+        .pattern-description {
+            color: #374151;
+            margin-bottom: 10px;
+        }
+
+        .pattern-example {
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            border: 1px solid #3b82f6;
+            color: #1e40af;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            border: 1px solid #22c55e;
+            color: #15803d;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚖 Göteborg Taxi - Mock Test Control</h1>
+        <p>Comprehensive testing system for carpooling with 20 orders over 48 hours</p>
+    </div>
+
+    <div class="container">
+        <!-- QR Codes Section -->
+        <div class="card">
+            <h2>📱 QR Codes for Mobile Testing</h2>
+            <div class="alert alert-info">
+                <strong>📲 Instructions:</strong> Scan these QR codes with your Android and iPhone to quickly access the apps for testing.
+            </div>
+            
+            <div class="qr-grid">
+                <div class="qr-card">
+                    <div class="qr-title">👥 User App</div>
+                    <div class="qr-description">For customers booking rides</div>
+                    <div class="qr-code" id="user-qr"></div>
+                    <a href="#" class="qr-link" id="user-link">Open User App</a>
+                </div>
+                
+                <div class="qr-card">
+                    <div class="qr-title">🚗 Driver App</div>
+                    <div class="qr-description">For taxi drivers accepting orders</div>
+                    <div class="qr-code" id="driver-qr"></div>
+                    <a href="#" class="qr-link" id="driver-link">Open Driver App</a>
+                </div>
+                
+                <div class="qr-card">
+                    <div class="qr-title">📊 Management Dashboard</div>
+                    <div class="qr-description">Live tracking and manual order management</div>
+                    <div class="qr-code" id="dashboard-qr"></div>
+                    <a href="#" class="qr-link" id="dashboard-link">Open Dashboard</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Control Section -->
+        <div class="card">
+            <h2>🎮 Test Control</h2>
+            <div class="alert alert-warning">
+                <strong>⚠️ Driver Constraint:</strong> Each driver can only handle ONE merged order at a time - just like in reality!
+            </div>
+            
+            <div class="control-buttons">
+                <button class="control-button" onclick="initializeTestData()">
+                    🚀 Initialize Test Data
+                </button>
+                <button class="control-button" onclick="startSimulation()">
+                    ⏯️ Start 48h Simulation
+                </button>
+                <button class="control-button" onclick="startFastSimulation()">
+                    ⏩ Fast Simulation (10x speed)
+                </button>
+                <button class="control-button danger" onclick="resetSystem()">
+                    🔄 Reset System
+                </button>
+            </div>
+        </div>
+
+        <!-- Live Status Section -->
+        <div class="card">
+            <h2>📊 Live Status</h2>
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-number" id="total-orders">0</div>
+                    <div class="status-label">Total Orders</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-number" id="active-drivers">0</div>
+                    <div class="status-label">Active Drivers</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-number" id="pending-orders">0</div>
+                    <div class="status-label">Pending Orders</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-number" id="completed-trips">0</div>
+                    <div class="status-label">Completed Trips</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Carpooling Patterns Section -->
+        <div class="card">
+            <h2>🔀 Carpooling Patterns</h2>
+            <div class="alert alert-info">
+                <strong>🧠 Smart Routing:</strong> The system supports multiple carpooling patterns, not just "pick up all, then deliver all".
+            </div>
+            
+            <div class="patterns-grid">
+                <div class="pattern-card">
+                    <div class="pattern-title">🔄 Sequential Pattern</div>
+                    <div class="pattern-description">Hämta A → Lämna A → Hämta B → Lämna B</div>
+                    <div class="pattern-example">
+                        <strong>Example:</strong> Take patient to hospital, then pick up another patient from hospital
+                    </div>
+                </div>
+                
+                <div class="pattern-card">
+                    <div class="pattern-title">📦 Batch Pickup</div>
+                    <div class="pattern-description">Hämta A → Hämta B → Lämna A → Lämna B</div>
+                    <div class="pattern-example">
+                        <strong>Example:</strong> Collect multiple patients, then deliver all to hospital
+                    </div>
+                </div>
+                
+                <div class="pattern-card">
+                    <div class="pattern-title">🌐 Mixed Pattern</div>
+                    <div class="pattern-description">Hämta A → Lämna A → Hämta B → Hämta C → Lämna B → Lämna C</div>
+                    <div class="pattern-example">
+                        <strong>Example:</strong> Complex routing with multiple stops and optimized paths
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Log Section -->
+        <div class="card">
+            <h2>📝 System Log</h2>
+            <div class="log-area" id="system-log">
+                System ready for testing...<br>
+                📱 Scan QR codes to access mobile apps<br>
+                🚀 Click "Initialize Test Data" to begin<br>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let logArea = document.getElementById('system-log');
+        let baseUrl = 'http://192.168.1.125'; // Change to your IP
+
+        // Generate QR codes on page load
+        window.onload = function() {
+            generateQRCodes();
+            updateStatus();
+            setInterval(updateStatus, 5000); // Update every 5 seconds
+        };
+
+        function generateQRCodes() {
+            const userAppUrl = `${baseUrl}:8081/user-app`;
+            const driverAppUrl = `${baseUrl}:8081/driver-app`;
+            const dashboardUrl = `${baseUrl}:3001/dashboard.html`;
+
+            // Generate QR codes
+            QRCode.toCanvas(document.getElementById('user-qr'), userAppUrl, function(error) {
+                if (error) console.error(error);
+                document.getElementById('user-link').href = userAppUrl;
+            });
+
+            QRCode.toCanvas(document.getElementById('driver-qr'), driverAppUrl, function(error) {
+                if (error) console.error(error);
+                document.getElementById('driver-link').href = driverAppUrl;
+            });
+
+            QRCode.toCanvas(document.getElementById('dashboard-qr'), dashboardUrl, function(error) {
+                if (error) console.error(error);
+                document.getElementById('dashboard-link').href = dashboardUrl;
+            });
+        }
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString('sv-SE');
+            logArea.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        async function initializeTestData() {
+            log('🚀 Initializing mock test data...');
+            
+            try {
+                const response = await fetch('/api/mock-test/initialize');
+                const result = await response.json();
+                
+                if (result.success) {
+                    log(`✅ ${result.message}`);
+                    log(`📊 Generated ${result.data.ordersGenerated} orders over ${result.data.timeSpan}`);
+                    log(`🔀 ${result.data.patterns} carpooling patterns available`);
+                    log(`⚠️ Driver constraint: One driver per merged order enforced`);
+                } else {
+                    log(`❌ Failed to initialize test data`);
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`);
+            }
+        }
+
+        async function startSimulation() {
+            log('⏯️ Starting 48-hour simulation at normal speed...');
+            
+            try {
+                const response = await fetch('/api/mock-test/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speedMultiplier: 1 })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    log(`✅ ${result.message}`);
+                    log(`📅 Processing ${result.totalOrders} orders over ${result.estimatedDuration}`);
+                } else {
+                    log(`❌ Failed to start simulation`);
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`);
+            }
+        }
+
+        async function startFastSimulation() {
+            log('⏩ Starting 48-hour simulation at 10x speed...');
+            
+            try {
+                const response = await fetch('/api/mock-test/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speedMultiplier: 10 })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    log(`✅ ${result.message}`);
+                    log(`⚡ Processing ${result.totalOrders} orders over ${result.estimatedDuration}`);
+                } else {
+                    log(`❌ Failed to start fast simulation`);
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`);
+            }
+        }
+
+        function resetSystem() {
+            log('🔄 Resetting system...');
+            logArea.innerHTML = 'System reset complete.<br>📱 Scan QR codes to access mobile apps<br>🚀 Click "Initialize Test Data" to begin<br>';
+        }
+
+        async function updateStatus() {
+            try {
+                const [statusRes, ordersRes] = await Promise.all([
+                    fetch('/status'),
+                    fetch('/api/mock-test/orders')
+                ]);
+                
+                const status = await statusRes.json();
+                const orders = await ordersRes.json();
+                
+                document.getElementById('total-orders').textContent = orders.total || 0;
+                document.getElementById('active-drivers').textContent = status.activeDrivers || 0;
+                document.getElementById('pending-orders').textContent = status.sharedTrips || 0;
+                document.getElementById('completed-trips').textContent = status.activeTrips || 0;
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+    </script>
+</body>
+</html>

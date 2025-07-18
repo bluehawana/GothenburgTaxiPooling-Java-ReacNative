@@ -7,17 +7,38 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Platform
+  Platform,
+  Modal
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import axios from 'axios';
+import io from 'socket.io-client';
+import MapView, { Marker } from 'react-native-maps';
 
 // Use your computer's IP address instead of localhost for testing on real device
-const API_URL = 'http://192.168.1.125:8081'; // Change this to your computer's IP
+const API_URL = 'http://192.168.2.71:8081'; // Updated to your current IP
+const REALTIME_URL = 'http://192.168.2.71:3001'; // Real-time service
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function App() {
   const [location, setLocation] = useState(null);
+  const [currentAddress, setCurrentAddress] = useState('');
+  const [gettingLocation, setGettingLocation] = useState(false);
+  const [socket, setSocket] = useState(null);
+  const [orderStatus, setOrderStatus] = useState(null);
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [driverLocation, setDriverLocation] = useState(null);
+  const [tripDetails, setTripDetails] = useState(null);
   const [tripData, setTripData] = useState({
     userId: 1,
     pickupAddress: '',
@@ -34,16 +55,170 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      // Request location permissions
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission to access location was denied');
         return;
       }
 
+      // Request notification permissions
+      const { status: notificationStatus } = await Notifications.requestPermissionsAsync();
+      if (notificationStatus !== 'granted') {
+        Alert.alert('Notifieringstillstånd krävs för att få uppdateringar om din resa');
+      }
+
+      // Get initial location
       let location = await Location.getCurrentPositionAsync({});
       setLocation(location);
+      
+      // Get address from coordinates
+      try {
+        const address = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        
+        if (address[0]) {
+          const addr = address[0];
+          const formattedAddress = `${addr.street || ''} ${addr.streetNumber || ''}, ${addr.city || 'Göteborg'}`.trim();
+          setCurrentAddress(formattedAddress);
+        }
+      } catch (error) {
+        console.log('Error getting address:', error);
+        setCurrentAddress('Aktuell position tillgänglig');
+      }
+
+      // Initialize socket connection
+      const socketConnection = io(REALTIME_URL);
+      setSocket(socketConnection);
+
+      // Connect as passenger
+      socketConnection.emit('passenger-connect', { userId: tripData.userId });
+
+      // Listen for driver assignment
+      socketConnection.on('driver-assigned', (data) => {
+        setTripDetails(data);
+        setOrderStatus('driver_assigned');
+        
+        // Show notification
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: '🚖 Förare tilldelad!',
+            body: `Din resa har matchats. Förare: ${data.driverInfo?.licensePlate || 'Information kommer'}`,
+            data: { type: 'driver_assigned' },
+          },
+          trigger: null,
+        });
+
+        Alert.alert(
+          '🚖 Förare tilldelad!',
+          `Din resa har matchats med en förare. Tryck på "Spåra resa" för att se din förares position.`,
+          [{ text: 'OK', onPress: () => setShowTrackingModal(true) }]
+        );
+      });
+
+      // Listen for driver location updates
+      socketConnection.on('driver-location-update', (data) => {
+        if (tripDetails && data.sharedTripId === tripDetails.sharedTripId) {
+          setDriverLocation(data.location);
+        }
+      });
+
+      // Listen for trip status updates
+      socketConnection.on('trip-status-update', (data) => {
+        setOrderStatus(data.status);
+        
+        let notificationTitle = '';
+        let notificationBody = '';
+        
+        switch(data.status) {
+          case 'pickup_confirmed':
+            notificationTitle = '📍 Föraren är på väg!';
+            notificationBody = `Din förare har bekräftat upphämtning. Beräknad ankomst: ${data.estimatedArrival || '15 minuter'}`;
+            break;
+          case 'arrived':
+            notificationTitle = '🚖 Föraren har anlänt!';
+            notificationBody = 'Din förare väntar utanför. Titta efter bilen med registreringsnummer: ' + (data.licensePlate || 'Se appen');
+            break;
+          case 'in_progress':
+            notificationTitle = '🛣️ Resan pågår';
+            notificationBody = 'Du är nu på väg till din destination. Ha en trevlig resa!';
+            break;
+          case 'completed':
+            notificationTitle = '✅ Resa avslutad';
+            notificationBody = 'Tack för att du reste med Göteborg Taxi! Vi hoppas du hade en bra resa.';
+            break;
+        }
+        
+        if (notificationTitle) {
+          Notifications.scheduleNotificationAsync({
+            content: {
+              title: notificationTitle,
+              body: notificationBody,
+              data: { type: 'status_update', status: data.status },
+            },
+            trigger: null,
+          });
+        }
+      });
+
+      return () => {
+        socketConnection.disconnect();
+      };
     })();
   }, []);
+
+  const getCurrentLocation = async () => {
+    setGettingLocation(true);
+    
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('GPS-tillstånd krävs', 'Vi behöver tillgång till din position för att hjälpa dig.');
+        setGettingLocation(false);
+        return;
+      }
+
+      const newLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      
+      setLocation(newLocation);
+      
+      // Convert coordinates to address
+      const address = await Location.reverseGeocodeAsync({
+        latitude: newLocation.coords.latitude,
+        longitude: newLocation.coords.longitude,
+      });
+      
+      if (address[0]) {
+        const addr = address[0];
+        const formattedAddress = `${addr.street || ''} ${addr.streetNumber || ''}, ${addr.city || 'Göteborg'}`.trim();
+        
+        // Auto-fill pickup address
+        setTripData(prev => ({
+          ...prev,
+          pickupAddress: formattedAddress
+        }));
+        
+        setCurrentAddress(formattedAddress);
+        Alert.alert('Position hittad!', `Din adress: ${formattedAddress}`);
+      } else {
+        Alert.alert('Adress hittades ej', 'Position hämtad men adress kunde inte bestämmas.');
+        setTripData(prev => ({
+          ...prev,
+          pickupAddress: 'Min aktuella position'
+        }));
+      }
+      
+    } catch (error) {
+      Alert.alert('GPS-fel', 'Kunde inte hämta din position. Kontrollera att GPS är aktivt.');
+      console.error('Location error:', error);
+    } finally {
+      setGettingLocation(false);
+    }
+  };
 
   const handleBookTrip = async () => {
     if (!tripData.pickupAddress || !tripData.destinationAddress) {
@@ -83,6 +258,100 @@ export default function App() {
     }
   };
 
+  const renderTrackingModal = () => (
+    <Modal
+      visible={showTrackingModal}
+      animationType="slide"
+      onRequestClose={() => setShowTrackingModal(false)}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>🚖 Spåra din resa</Text>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setShowTrackingModal(false)}
+          >
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {tripDetails && (
+          <View style={styles.tripInfo}>
+            <Text style={styles.tripInfoText}>
+              📍 Status: {orderStatus === 'driver_assigned' ? 'Förare tilldelad' : 
+                         orderStatus === 'pickup_confirmed' ? 'På väg till dig' :
+                         orderStatus === 'arrived' ? 'Föraren har anlänt' :
+                         orderStatus === 'in_progress' ? 'Resan pågår' : 'Uppdaterar...'}
+            </Text>
+            {tripDetails.driverInfo && (
+              <>
+                <Text style={styles.tripInfoText}>
+                  🚗 Registreringsnummer: {tripDetails.driverInfo.licensePlate || 'Laddar...'}
+                </Text>
+                <Text style={styles.tripInfoText}>
+                  📞 Telefon: {tripDetails.driverInfo.phoneNumber || 'Tillgänglig vid behov'}
+                </Text>
+                <Text style={styles.tripInfoText}>
+                  🕐 Beräknad ankomst: {tripDetails.estimatedArrival || 'Beräknar...'}
+                </Text>
+              </>
+            )}
+          </View>
+        )}
+
+        {location && (
+          <MapView
+            style={styles.map}
+            initialRegion={{
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            showsUserLocation={true}
+            followsUserLocation={true}
+          >
+            {/* User location marker */}
+            <Marker
+              coordinate={{
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+              }}
+              title="Din position"
+              description="Du är här"
+              pinColor="blue"
+            />
+            
+            {/* Driver location marker */}
+            {driverLocation && (
+              <Marker
+                coordinate={{
+                  latitude: driverLocation.latitude,
+                  longitude: driverLocation.longitude,
+                }}
+                title="🚖 Din förare"
+                description={`Registreringsnummer: ${tripDetails?.driverInfo?.licensePlate || 'Laddar...'}`}
+                pinColor="yellow"
+              />
+            )}
+          </MapView>
+        )}
+        
+        <View style={styles.mapFooter}>
+          <TouchableOpacity
+            style={styles.refreshLocationButton}
+            onPress={() => {
+              // Refresh location and send to socket
+              getCurrentLocation();
+            }}
+          >
+            <Text style={styles.refreshLocationButtonText}>🔄 Uppdatera position</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -94,15 +363,34 @@ export default function App() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 Resesinfo</Text>
+          <Text style={styles.helpText}>
+            💡 Tryck på 📍-knappen för att automatiskt fylla i din nuvarande adress
+          </Text>
           
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Upphämtningsadress</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ange din adress..."
-              value={tripData.pickupAddress}
-              onChangeText={(text) => setTripData({...tripData, pickupAddress: text})}
-            />
+            <View style={styles.addressInputContainer}>
+              <TextInput
+                style={[styles.input, styles.addressInput]}
+                placeholder="Ange din adress..."
+                value={tripData.pickupAddress}
+                onChangeText={(text) => setTripData({...tripData, pickupAddress: text})}
+              />
+              <TouchableOpacity
+                style={[styles.locationButton, gettingLocation && styles.locationButtonActive]}
+                onPress={getCurrentLocation}
+                disabled={gettingLocation}
+              >
+                <Text style={styles.locationButtonText}>
+                  {gettingLocation ? '🔄' : '📍'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {currentAddress && (
+              <Text style={styles.currentLocationText}>
+                Aktuell position: {currentAddress}
+              </Text>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -173,6 +461,50 @@ export default function App() {
           </View>
         </View>
 
+        {/* Order Status Section */}
+        {orderStatus && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📱 Resestatus</Text>
+            <View style={styles.statusContainer}>
+              <Text style={styles.statusText}>
+                {orderStatus === 'driver_assigned' ? '✅ Förare tilldelad - Din resa är matchad!' :
+                 orderStatus === 'pickup_confirmed' ? '🚗 Föraren är på väg till dig' :
+                 orderStatus === 'arrived' ? '📍 Föraren har anlänt - Gå ut och leta efter bilen' :
+                 orderStatus === 'in_progress' ? '🛣️ Resan pågår - Ha en trevlig resa!' :
+                 orderStatus === 'completed' ? '✅ Resa avslutad - Tack för att du reste med oss!' :
+                 '🔄 Uppdaterar...'}
+              </Text>
+              
+              {tripDetails && (
+                <View style={styles.tripDetailsContainer}>
+                  {tripDetails.driverInfo?.licensePlate && (
+                    <Text style={styles.tripDetailText}>
+                      🚗 Bil: {tripDetails.driverInfo.licensePlate}
+                    </Text>
+                  )}
+                  {tripDetails.driverInfo?.phoneNumber && (
+                    <Text style={styles.tripDetailText}>
+                      📞 Telefon: {tripDetails.driverInfo.phoneNumber}
+                    </Text>
+                  )}
+                  {tripDetails.estimatedArrival && (
+                    <Text style={styles.tripDetailText}>
+                      🕐 Ankomst: {tripDetails.estimatedArrival}
+                    </Text>
+                  )}
+                </View>
+              )}
+              
+              <TouchableOpacity
+                style={styles.trackingButton}
+                onPress={() => setShowTrackingModal(true)}
+              >
+                <Text style={styles.trackingButtonText}>🗺️ Spåra resa live</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>💰 Kostnadsbesparing</Text>
           <View style={styles.costComparison}>
@@ -217,6 +549,9 @@ export default function App() {
           </Text>
         </View>
       </ScrollView>
+      
+      {/* Tracking Modal */}
+      {renderTrackingModal()}
     </View>
   );
 }
@@ -261,6 +596,16 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     color: '#1f2937',
   },
+  helpText: {
+    fontSize: 14,
+    color: '#059669',
+    marginBottom: 15,
+    padding: 10,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    borderLeft: 4,
+    borderLeftColor: '#059669',
+  },
   inputGroup: {
     marginBottom: 15,
   },
@@ -277,6 +622,35 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     backgroundColor: '#f9fafb',
+  },
+  addressInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addressInput: {
+    flex: 1,
+    marginRight: 10,
+  },
+  locationButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationButtonActive: {
+    backgroundColor: '#1d4ed8',
+  },
+  locationButtonText: {
+    fontSize: 20,
+    color: 'white',
+  },
+  currentLocationText: {
+    fontSize: 12,
+    color: '#059669',
+    marginTop: 5,
+    fontStyle: 'italic',
   },
   textArea: {
     height: 80,
@@ -403,5 +777,107 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  // Status and tracking styles
+  statusContainer: {
+    backgroundColor: '#f0fdf4',
+    padding: 15,
+    borderRadius: 8,
+    borderLeft: 4,
+    borderLeftColor: '#059669',
+  },
+  statusText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#059669',
+    marginBottom: 10,
+  },
+  tripDetailsContainer: {
+    marginTop: 10,
+    marginBottom: 15,
+  },
+  tripDetailText: {
+    fontSize: 14,
+    color: '#374151',
+    marginBottom: 5,
+  },
+  trackingButton: {
+    backgroundColor: '#2563eb',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  trackingButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  modalHeader: {
+    backgroundColor: '#2563eb',
+    padding: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  closeButton: {
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  tripInfo: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 15,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tripInfoText: {
+    fontSize: 14,
+    color: '#374151',
+    marginBottom: 5,
+  },
+  map: {
+    flex: 1,
+    margin: 15,
+    borderRadius: 8,
+  },
+  mapFooter: {
+    padding: 15,
+    backgroundColor: 'white',
+  },
+  refreshLocationButton: {
+    backgroundColor: '#059669',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  refreshLocationButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

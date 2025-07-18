@@ -1,29 +1,36 @@
 {
   "expo": {
-    "name": "Göteborg Taxi User",
+    "name": "Göteborg Taxi - Passenger",
     "slug": "gothenburg-taxi-user",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#2563eb"
+      "backgroundColor": "#ffffff"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "se.gothenburg.taxi.user"
+      "supportsTablet": true,
+      "bundleIdentifier": "se.gothenburg.taxi.passenger",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vi behöver din plats för att hitta närmaste taxi och beräkna resvägar.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Vi behöver din plats för att följa din resa och ge föraren rätt riktning.",
+        "CFBundleDisplayName": "Göteborg Taxi"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#2563eb"
       },
-      "package": "se.gothenburg.taxi.user",
+      "package": "se.gothenburg.taxi.passenger",
+      "versionCode": 1,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -33,7 +40,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-location"
-    ]
+      "expo-location",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "passenger-app-project-id"
+      }
+    }
   }
 }

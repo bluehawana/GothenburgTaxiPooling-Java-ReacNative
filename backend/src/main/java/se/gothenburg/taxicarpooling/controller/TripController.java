@@ -18,12 +18,14 @@ public class TripController {
     private TripRequestService tripRequestService;
     
     @PostMapping("/book")
-    public ResponseEntity<TripRequest> bookTrip(@RequestBody TripRequestDto tripRequestDto) {
+    public ResponseEntity<?> bookTrip(@RequestBody TripRequestDto tripRequestDto) {
         try {
             TripRequest savedTrip = tripRequestService.createTripRequest(tripRequestDto);
             return ResponseEntity.ok(savedTrip);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().build();
+            System.err.println("Trip booking error: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.badRequest().body("Error creating trip: " + e.getMessage());
         }
     }
     
@@ -47,7 +49,19 @@ public class TripController {
             TripRequest updatedTrip = tripRequestService.updateTripStatus(tripId, status);
             return ResponseEntity.ok(updatedTrip);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+    
+    @PostMapping("/{tripId}/assign")
+    public ResponseEntity<?> assignTripToDriver(
+            @PathVariable Long tripId,
+            @RequestParam Long driverId) {
+        try {
+            TripRequest assignedTrip = tripRequestService.assignMergedTripToDriver(tripId, driverId);
+            return ResponseEntity.ok(assignedTrip);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
     

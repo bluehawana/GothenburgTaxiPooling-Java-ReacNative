@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Göteborg Taxi - Management Dashboard</title>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places"></script>
     <style>
         * {
             margin: 0;
@@ -41,8 +42,12 @@
             grid-template-columns: 1fr 1fr;
             gap: 20px;
             padding: 20px;
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
         }
 
         .card {
@@ -189,6 +194,200 @@
             font-size: 1.1rem;
             opacity: 0.9;
         }
+
+        /* Map styles */
+        .map-container {
+            height: 400px;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #live-map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .map-info {
+            background: #f8fafc;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+            color: #374151;
+        }
+
+        /* Manual Management Styles */
+        .mode-toggle {
+            display: flex;
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 20px;
+        }
+
+        .mode-button {
+            flex: 1;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .mode-button.active {
+            background: #2563eb;
+            color: white;
+        }
+
+        .mode-button:not(.active) {
+            background: transparent;
+            color: #64748b;
+        }
+
+        .unmatched-orders {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .order-item {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: move;
+            transition: all 0.2s;
+        }
+
+        .order-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .order-item.selected {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+
+        .order-item.dragging {
+            opacity: 0.5;
+        }
+
+        .merge-zone {
+            background: #f0fdf4;
+            border: 2px dashed #10b981;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            text-align: center;
+            min-height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .merge-zone.drag-over {
+            border-color: #059669;
+            background: #dcfce7;
+        }
+
+        .merge-preview {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .priority-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .priority-high {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .priority-normal {
+            background: #f0fdf4;
+            color: #059669;
+        }
+
+        .priority-low {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .manual-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .action-button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .action-button.merge {
+            background: #10b981;
+            color: white;
+        }
+
+        .action-button.merge:hover {
+            background: #059669;
+        }
+
+        .action-button.cancel {
+            background: #6b7280;
+            color: white;
+        }
+
+        .action-button.cancel:hover {
+            background: #4b5563;
+        }
+
+        .action-button.individual {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .action-button.individual:hover {
+            background: #d97706;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            color: #92400e;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            border: 1px solid #3b82f6;
+            color: #1e40af;
+        }
     </style>
 </head>
 <body>
@@ -217,6 +416,67 @@
     </div>
 
     <div class="dashboard">
+        <!-- Manual/Automatic Mode Toggle -->
+        <div class="card full-width">
+            <h2>🎛️ Operationsläge</h2>
+            <div class="mode-toggle">
+                <button class="mode-button active" id="auto-mode-btn" onclick="setMode('auto')">
+                    🤖 Automatisk matchning
+                </button>
+                <button class="mode-button" id="manual-mode-btn" onclick="setMode('manual')">
+                    👨‍💼 Manuell hantering
+                </button>
+            </div>
+            
+            <div id="mode-info" class="alert alert-info">
+                <strong>Automatisk läge:</strong> Systemet matchar automatiskt kompatibla resor baserat på tid, plats och tillgänglighet.
+            </div>
+        </div>
+
+        <!-- Manual Management Section (hidden by default) -->
+        <div class="card full-width" id="manual-management" style="display: none;">
+            <h2>🔧 Manuell orderhantering</h2>
+            
+            <!-- Unmatched Orders Alert -->
+            <div id="unmatched-alert" class="alert alert-warning" style="display: none;">
+                <strong>⚠️ Ej matchade beställningar:</strong> Det finns <span id="unmatched-count">0</span> beställningar som inte kunnat matchas automatiskt.
+            </div>
+            
+            <!-- Order Selection Area -->
+            <div class="unmatched-orders">
+                <h3>📋 Omatchade beställningar</h3>
+                <div id="unmatched-orders-list">
+                    <!-- Orders will be populated here -->
+                </div>
+            </div>
+            
+            <!-- Merge Zone -->
+            <div class="merge-zone" id="merge-zone">
+                <div>
+                    <h3>🔗 Dra beställningar hit för att slå ihop</h3>
+                    <p style="margin: 5px 0; color: #6b7280;">Eller klicka på beställningar för att välja dem</p>
+                </div>
+            </div>
+            
+            <!-- Selected Orders Preview -->
+            <div id="merge-preview" class="merge-preview" style="display: none;">
+                <h4>📝 Förhandsvisning av sammanslagen resa</h4>
+                <div id="merge-preview-content"></div>
+                
+                <div class="manual-actions">
+                    <button class="action-button merge" onclick="confirmMerge()">
+                        ✅ Bekräfta sammanslagning
+                    </button>
+                    <button class="action-button individual" onclick="sendIndividual()">
+                        🚖 Skicka som individuella resor
+                    </button>
+                    <button class="action-button cancel" onclick="clearSelection()">
+                        ❌ Avbryt
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="card">
             <h2>📍 Aktiva förare & positioner</h2>
             <button class="refresh-button" onclick="refreshDrivers()">Uppdatera</button>
@@ -232,12 +492,30 @@
                 <p>Laddar resor...</p>
             </div>
         </div>
+
+        <!-- Live Map - Full Width -->
+        <div class="card full-width">
+            <h2>🗺️ Live karta</h2>
+            <div class="map-info">
+                🚖 Gula markörer = Aktiva förare | 📍 Blå markörer = Upphämtningsplatser
+            </div>
+            <div class="map-container">
+                <div id="live-map"></div>
+            </div>
+            <button class="refresh-button" onclick="refreshMap()" style="margin-top: 10px;">Uppdatera karta</button>
+        </div>
     </div>
 
     <script>
         const socket = io();
         let drivers = new Map();
         let sharedTrips = new Map();
+        let unmatchedOrders = new Map();
+        let selectedOrders = new Set();
+        let currentMode = 'auto';
+        let map;
+        let driverMarkers = new Map();
+        let pickupMarkers = new Map();
         let stats = {
             activeDrivers: 0,
             sharedTrips: 0,
@@ -252,12 +530,35 @@
                 driver.location = data.location;
                 driver.lastUpdate = new Date();
                 updateDriversDisplay();
+                updateDriverMarker(data.driverId, data.location, data.vehicleInfo);
             }
         });
 
         socket.on('shared-trip-created', (data) => {
             console.log('New shared trip:', data);
             refreshTrips();
+        });
+
+        socket.on('shared-trip-status-update', (data) => {
+            console.log('Shared trip status update:', data);
+            
+            // Update local shared trip data
+            if (sharedTrips.has(data.sharedTripId)) {
+                const trip = sharedTrips.get(data.sharedTripId);
+                trip.status = data.status;
+                trip.assignedDriverId = data.driverId;
+                trip.assignedAt = data.assignedAt;
+                
+                // Update display immediately
+                updateTripsDisplay();
+                updateStats();
+            }
+            
+            // Also refresh from server to ensure consistency
+            setTimeout(() => {
+                refreshTrips();
+                fetchStats();
+            }, 1000);
         });
 
         // API functions
@@ -368,19 +669,38 @@
             }
             
             const tripsHTML = Array.from(sharedTrips.values()).map(trip => {
-                const statusClass = trip.status === 'PENDING_DRIVER_ASSIGNMENT' ? 'trip-matched' : 
-                                   trip.status === 'ASSIGNED' ? 'trip-assigned' : 'trip-completed';
+                let statusClass = '';
+                let statusText = '';
+                
+                switch(trip.status) {
+                    case 'PENDING_DRIVER_ASSIGNMENT':
+                        statusClass = 'trip-matched';
+                        statusText = 'Väntar på förare';
+                        break;
+                    case 'ASSIGNED':
+                        statusClass = 'trip-assigned';
+                        statusText = 'Förare tilldelad';
+                        break;
+                    case 'COMPLETED':
+                        statusClass = 'trip-completed';
+                        statusText = 'Avslutad';
+                        break;
+                    default:
+                        statusClass = 'trip-matched';
+                        statusText = trip.status;
+                }
                 
                 return `
                     <div class="trip-item ${statusClass}">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
                                 <strong>Delad resa ${trip.id}</strong>
-                                <span class="status-badge ${statusClass}">${trip.status}</span>
+                                <span class="status-badge ${statusClass}">${statusText}</span>
                             </div>
                             <div style="text-align: right;">
                                 <div>👥 ${trip.passengerCount} passagerare</div>
                                 <div style="font-size: 0.8rem; color: #6b7280;">800 SEK</div>
+                                ${trip.assignedDriverId ? `<div style="font-size: 0.8rem; color: #059669;">Förare: ${trip.assignedDriverId}</div>` : ''}
                             </div>
                         </div>
                         <div class="location-info">
@@ -391,6 +711,7 @@
                         </div>
                         <div class="last-update">
                             Skapad: ${new Date(trip.createdAt).toLocaleString('sv-SE')}
+                            ${trip.assignedAt ? `<br>Tilldelad: ${new Date(trip.assignedAt).toLocaleString('sv-SE')}` : ''}
                         </div>
                     </div>
                 `;
@@ -411,6 +732,421 @@
             document.getElementById('cost-savings').textContent = savings > 0 ? savings : 0;
         }
 
+        // Map functions
+        function initializeMap() {
+            // Center on Göteborg
+            const gothenburgCenter = { lat: 57.7089, lng: 11.9746 };
+            
+            map = new google.maps.Map(document.getElementById('live-map'), {
+                zoom: 12,
+                center: gothenburgCenter,
+                mapTypeId: 'roadmap',
+                styles: [
+                    {
+                        featureType: 'poi',
+                        elementType: 'labels',
+                        stylers: [{ visibility: 'off' }]
+                    }
+                ]
+            });
+            
+            console.log('Map initialized');
+        }
+
+        function updateDriverMarker(driverId, location, vehicleInfo) {
+            if (!map || !location) return;
+            
+            const position = { lat: location.latitude, lng: location.longitude };
+            
+            if (driverMarkers.has(driverId)) {
+                // Update existing marker
+                driverMarkers.get(driverId).setPosition(position);
+            } else {
+                // Create new marker
+                const marker = new google.maps.Marker({
+                    position: position,
+                    map: map,
+                    title: `🚖 Förare ${driverId}`,
+                    icon: {
+                        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                            <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="16" cy="16" r="14" fill="#fbbf24" stroke="#f59e0b" stroke-width="2"/>
+                                <text x="16" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#92400e">🚖</text>
+                            </svg>
+                        `),
+                        scaledSize: new google.maps.Size(32, 32),
+                        anchor: new google.maps.Point(16, 16)
+                    }
+                });
+                
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `
+                        <div style="padding: 8px;">
+                            <h4>🚖 Förare ${driverId}</h4>
+                            <p><strong>Registreringsnummer:</strong> ${vehicleInfo?.licensePlate || 'N/A'}</p>
+                            <p><strong>Bil:</strong> ${vehicleInfo?.make || 'N/A'} ${vehicleInfo?.model || ''}</p>
+                            <p><strong>Status:</strong> <span style="color: #059669;">Aktiv</span></p>
+                            <p><small>Senast uppdaterad: ${new Date().toLocaleTimeString('sv-SE')}</small></p>
+                        </div>
+                    `
+                });
+                
+                marker.addListener('click', () => {
+                    infoWindow.open(map, marker);
+                });
+                
+                driverMarkers.set(driverId, marker);
+            }
+        }
+
+        function addPickupMarkers() {
+            // Clear existing pickup markers
+            pickupMarkers.forEach(marker => marker.setMap(null));
+            pickupMarkers.clear();
+            
+            // Add markers for active trips
+            sharedTrips.forEach(trip => {
+                if (trip.status === 'ASSIGNED' || trip.status === 'PENDING_DRIVER_ASSIGNMENT') {
+                    trip.trips?.forEach((individualTrip, index) => {
+                        // For demo purposes, use approximate coordinates around Göteborg
+                        const lat = 57.7089 + (Math.random() - 0.5) * 0.1;
+                        const lng = 11.9746 + (Math.random() - 0.5) * 0.1;
+                        
+                        const marker = new google.maps.Marker({
+                            position: { lat, lng },
+                            map: map,
+                            title: `📍 Upphämtning: ${individualTrip.pickupAddress}`,
+                            icon: {
+                                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                                    <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="12" cy="12" r="10" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2"/>
+                                        <text x="12" y="16" text-anchor="middle" font-size="12" font-weight="bold" fill="white">📍</text>
+                                    </svg>
+                                `),
+                                scaledSize: new google.maps.Size(24, 24),
+                                anchor: new google.maps.Point(12, 12)
+                            }
+                        });
+                        
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `
+                                <div style="padding: 8px;">
+                                    <h4>📍 Upphämtning</h4>
+                                    <p><strong>Adress:</strong> ${individualTrip.pickupAddress}</p>
+                                    <p><strong>Destination:</strong> ${individualTrip.destinationAddress}</p>
+                                    <p><strong>Status:</strong> ${trip.status === 'ASSIGNED' ? 'Förare tilldelad' : 'Väntar på förare'}</p>
+                                    ${trip.assignedDriverId ? `<p><strong>Förare:</strong> ${trip.assignedDriverId}</p>` : ''}
+                                </div>
+                            `
+                        });
+                        
+                        marker.addListener('click', () => {
+                            infoWindow.open(map, marker);
+                        });
+                        
+                        pickupMarkers.set(`${trip.id}-${index}`, marker);
+                    });
+                }
+            });
+        }
+
+        function refreshMap() {
+            if (map) {
+                // Update all driver markers
+                drivers.forEach((driver, driverId) => {
+                    if (driver.location) {
+                        updateDriverMarker(driverId, driver.location, driver.vehicleInfo);
+                    }
+                });
+                
+                // Update pickup markers
+                addPickupMarkers();
+            }
+        }
+
+        // Manual Mode Management Functions
+        function setMode(mode) {
+            currentMode = mode;
+            const autoBtn = document.getElementById('auto-mode-btn');
+            const manualBtn = document.getElementById('manual-mode-btn');
+            const manualSection = document.getElementById('manual-management');
+            const modeInfo = document.getElementById('mode-info');
+            
+            if (mode === 'auto') {
+                autoBtn.classList.add('active');
+                manualBtn.classList.remove('active');
+                manualSection.style.display = 'none';
+                modeInfo.innerHTML = '<strong>Automatisk läge:</strong> Systemet matchar automatiskt kompatibla resor baserat på tid, plats och tillgänglighet.';
+                modeInfo.className = 'alert alert-info';
+            } else {
+                autoBtn.classList.remove('active');
+                manualBtn.classList.add('active');
+                manualSection.style.display = 'block';
+                modeInfo.innerHTML = '<strong>Manuell läge:</strong> Automatisk matchning är avstängd. Hantera obearbetade beställningar manuellt.';
+                modeInfo.className = 'alert alert-warning';
+                
+                // Fetch unmatched orders
+                fetchUnmatchedOrders();
+            }
+        }
+
+        async function fetchUnmatchedOrders() {
+            try {
+                const response = await fetch('/api/pending-orders');
+                const orders = await response.json();
+                
+                unmatchedOrders.clear();
+                orders.forEach(order => {
+                    unmatchedOrders.set(order.id, order);
+                });
+                
+                updateUnmatchedOrdersDisplay();
+            } catch (error) {
+                console.error('Error fetching unmatched orders:', error);
+            }
+        }
+
+        function updateUnmatchedOrdersDisplay() {
+            const container = document.getElementById('unmatched-orders-list');
+            const alert = document.getElementById('unmatched-alert');
+            const countSpan = document.getElementById('unmatched-count');
+            
+            if (unmatchedOrders.size === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 20px;">Inga omatchade beställningar</p>';
+                alert.style.display = 'none';
+                return;
+            }
+            
+            alert.style.display = 'block';
+            countSpan.textContent = unmatchedOrders.size;
+            
+            const ordersHTML = Array.from(unmatchedOrders.values()).map(order => `
+                <div class="order-item" data-order-id="${order.id}" onclick="toggleOrderSelection(${order.id})" draggable="true">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>#${order.id} - ${order.userName}</strong>
+                            <span class="priority-badge priority-${order.priority.toLowerCase()}">${order.priority}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.8rem; color: #6b7280;">
+                                ${new Date(order.requestedPickupTime).toLocaleString('sv-SE')}
+                            </div>
+                            <div style="font-size: 0.8rem; color: #059669;">
+                                ${order.estimatedCost} SEK
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <div style="font-size: 0.85rem; color: #374151;">
+                            📍 ${order.pickupAddress}
+                        </div>
+                        <div style="font-size: 0.85rem; color: #374151;">
+                            🏁 ${order.destinationAddress}
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.8rem; color: #6b7280;">
+                        👥 ${order.passengerCount} passagerare
+                        ${order.needsWheelchairAccess ? '♿ Rullstol' : ''}
+                        ${order.needsAssistance ? '🤝 Assistans' : ''}
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = ordersHTML;
+            
+            // Add drag and drop listeners
+            setupDragAndDrop();
+        }
+
+        function toggleOrderSelection(orderId) {
+            const orderElement = document.querySelector(`[data-order-id="${orderId}"]`);
+            
+            if (selectedOrders.has(orderId)) {
+                selectedOrders.delete(orderId);
+                orderElement.classList.remove('selected');
+            } else {
+                selectedOrders.add(orderId);
+                orderElement.classList.add('selected');
+            }
+            
+            updateMergePreview();
+        }
+
+        function clearSelection() {
+            selectedOrders.clear();
+            document.querySelectorAll('.order-item.selected').forEach(item => {
+                item.classList.remove('selected');
+            });
+            updateMergePreview();
+        }
+
+        function setupDragAndDrop() {
+            const orderItems = document.querySelectorAll('.order-item');
+            const mergeZone = document.getElementById('merge-zone');
+            
+            orderItems.forEach(item => {
+                item.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', item.dataset.orderId);
+                    item.classList.add('dragging');
+                });
+                
+                item.addEventListener('dragend', (e) => {
+                    item.classList.remove('dragging');
+                });
+            });
+            
+            mergeZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                mergeZone.classList.add('drag-over');
+            });
+            
+            mergeZone.addEventListener('dragleave', () => {
+                mergeZone.classList.remove('drag-over');
+            });
+            
+            mergeZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                mergeZone.classList.remove('drag-over');
+                
+                const orderId = parseInt(e.dataTransfer.getData('text/plain'));
+                if (!selectedOrders.has(orderId)) {
+                    selectedOrders.add(orderId);
+                    document.querySelector(`[data-order-id="${orderId}"]`).classList.add('selected');
+                    updateMergePreview();
+                }
+            });
+        }
+
+        function updateMergePreview() {
+            const previewContainer = document.getElementById('merge-preview');
+            const previewContent = document.getElementById('merge-preview-content');
+            
+            if (selectedOrders.size === 0) {
+                previewContainer.style.display = 'none';
+                return;
+            }
+            
+            previewContainer.style.display = 'block';
+            
+            const selectedOrdersData = Array.from(selectedOrders).map(id => unmatchedOrders.get(id));
+            const totalCost = selectedOrdersData.reduce((sum, order) => sum + order.estimatedCost, 0);
+            const totalPassengers = selectedOrdersData.reduce((sum, order) => sum + order.passengerCount, 0);
+            
+            const previewHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div>
+                        <strong>Sammanslagen resa med ${selectedOrders.size} beställningar</strong>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.2rem; color: #059669; font-weight: bold;">
+                            ${totalCost} SEK
+                        </div>
+                        <div style="font-size: 0.9rem; color: #6b7280;">
+                            👥 ${totalPassengers} passagerare
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <h5>🛣️ Reserutt (föreslaget):</h5>
+                    ${selectedOrdersData.map((order, index) => `
+                        <div style="margin: 5px 0; padding-left: 10px; border-left: 3px solid #10b981;">
+                            ${index + 1}. Hämta ${order.userName} vid ${order.pickupAddress}
+                        </div>
+                    `).join('')}
+                    ${selectedOrdersData.map((order, index) => `
+                        <div style="margin: 5px 0; padding-left: 10px; border-left: 3px solid #3b82f6;">
+                            ${selectedOrdersData.length + index + 1}. Lämna ${order.userName} vid ${order.destinationAddress}
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="background: #f8fafc; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #374151;">
+                    <strong>💡 Tips:</strong> Kontrollera att tiderna är kompatibla och att rutten är effektiv innan du bekräftar sammanslagningen.
+                </div>
+            `;
+            
+            previewContent.innerHTML = previewHTML;
+        }
+
+        async function confirmMerge() {
+            if (selectedOrders.size < 2) {
+                alert('Välj minst 2 beställningar för att slå ihop dem.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/manual-merge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        orderIds: Array.from(selectedOrders),
+                        mergedBy: 'Manual Agent',
+                        timestamp: new Date().toISOString()
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Beställningarna har framgångsrikt slagits ihop och skickats till förare!');
+                    
+                    // Remove merged orders from unmatched list
+                    selectedOrders.forEach(orderId => {
+                        unmatchedOrders.delete(orderId);
+                    });
+                    
+                    clearSelection();
+                    updateUnmatchedOrdersDisplay();
+                    refreshTrips();
+                } else {
+                    alert('Fel vid sammanslagning. Försök igen.');
+                }
+            } catch (error) {
+                console.error('Error merging orders:', error);
+                alert('Tekniskt fel vid sammanslagning.');
+            }
+        }
+
+        async function sendIndividual() {
+            if (selectedOrders.size === 0) {
+                alert('Välj beställningar att skicka som individuella resor.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/send-individual', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        orderIds: Array.from(selectedOrders),
+                        sentBy: 'Manual Agent',
+                        timestamp: new Date().toISOString()
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Beställningarna har skickats som individuella resor till förare!');
+                    
+                    // Remove sent orders from unmatched list
+                    selectedOrders.forEach(orderId => {
+                        unmatchedOrders.delete(orderId);
+                    });
+                    
+                    clearSelection();
+                    updateUnmatchedOrdersDisplay();
+                    refreshTrips();
+                } else {
+                    alert('Fel vid skickande. Försök igen.');
+                }
+            } catch (error) {
+                console.error('Error sending individual orders:', error);
+                alert('Tekniskt fel vid skickande.');
+            }
+        }
+
         // Refresh functions
         function refreshDrivers() {
             fetchDrivers();
@@ -422,6 +1158,14 @@
 
         // Initialize
         function init() {
+            // Initialize map first
+            if (typeof google !== 'undefined') {
+                initializeMap();
+            } else {
+                console.warn('Google Maps API not loaded. Using fallback map.');
+                document.getElementById('live-map').innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280;">Live karta kommer snart<br><small>Google Maps API krävs</small></div>';
+            }
+            
             fetchDrivers();
             fetchTrips();
             fetchStats();
@@ -431,6 +1175,7 @@
                 fetchDrivers();
                 fetchTrips();
                 fetchStats();
+                refreshMap();
             }, 30000);
         }
 

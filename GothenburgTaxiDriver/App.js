@@ -10,12 +10,22 @@ import {
   FlatList
 } from 'react-native';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import io from 'socket.io-client';
 
-// Change line 7 to use your computer's IP address
-const API_URL = 'http://192.168.1.125:8081'; // Change this to your computer's IP
-const REALTIME_URL = 'http://192.168.1.125:3001';
+// Use localhost for testing
+const API_URL = 'http://localhost:8081';
+const REALTIME_URL = 'http://localhost:3001';
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function DriverApp() {
   const [location, setLocation] = useState(null);
@@ -23,8 +33,21 @@ export default function DriverApp() {
   const [isOnline, setIsOnline] = useState(false);
   const [assignedTrips, setAssignedTrips] = useState([]);
   const [socket, setSocket] = useState(null);
-  const [earnings, setEarnings] = useState({ today: 0, trips: 0 });
+  const [earnings, setEarnings] = useState({ today: 0, trips: 0, currentOrderId: null });
   const [acceptingTrips, setAcceptingTrips] = useState(new Set()); // Track accepting trips
+  const [currentTripStatus, setCurrentTripStatus] = useState(null);
+  const [activeSharedTrip, setActiveSharedTrip] = useState(null);
+  
+  // Driver vehicle information
+  const [vehicleInfo] = useState({
+    licensePlate: 'GTB789',
+    make: 'Volvo',
+    model: 'V70',
+    color: 'Vit',
+    phoneNumber: '031-789-1234',
+    driverName: `Förare ${4}`,
+    wheelchairAccessible: false
+  });
 
   useEffect(() => {
     (async () => {
@@ -76,6 +99,19 @@ export default function DriverApp() {
       setAssignedTrips(prev => prev.filter(trip => trip.tripId !== data.sharedTripId));
     });
 
+    newSocket.on('assignment-rejected', (data) => {
+      Alert.alert(
+        'Uppdrag avvisat',
+        data.reason,
+        [{ text: 'OK', style: 'default' }]
+      );
+      
+      // Remove the trip from available trips
+      if (data.sharedTripId) {
+        setAssignedTrips(prev => prev.filter(trip => trip.tripId !== data.sharedTripId));
+      }
+    });
+
     return () => newSocket.close();
   }, []);
 
@@ -96,12 +132,7 @@ export default function DriverApp() {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude
         },
-        vehicleInfo: {
-          licensePlate: 'ABC123',
-          make: 'Volvo',
-          model: 'V70',
-          wheelchairAccessible: false
-        }
+        vehicleInfo: vehicleInfo
       });
 
       // Start sending location updates every 10 seconds
@@ -124,21 +155,51 @@ export default function DriverApp() {
   };
 
   const acceptSharedTrip = (sharedTripId) => {
-    // Check if trip is already being accepted or already accepted
+    console.log('acceptSharedTrip called for trip:', sharedTripId);
+    
+    // STRONG CHECK: If trip is already being processed
     if (acceptingTrips.has(sharedTripId)) {
-      Alert.alert('Info', 'Denna resa bearbetas redan...');
+      Alert.alert('Varning', 'Du har accepterat denna order, behöver inte att göra det igen!');
       return;
     }
     
+    // STRONG CHECK: If trip is already accepted
     const trip = assignedTrips.find(t => t.tripId === sharedTripId);
     if (trip && trip.accepted) {
-      Alert.alert('Info', 'Denna resa har redan accepterats.');
+      Alert.alert('Varning', 'Du har accepterat denna order, behöver inte att göra det igen!');
       return;
     }
     
-    // Add to accepting set to prevent double acceptance
-    setAcceptingTrips(prev => new Set([...prev, sharedTripId]));
+    // STRONG CHECK: Prevent multiple simultaneous calls
+    if (trip && trip.status === 'ASSIGNED') {
+      Alert.alert('Varning', 'Du har accepterat denna order, behöver inte att göra det igen!');
+      return;
+    }
     
+    console.log('Adding trip to accepting set:', sharedTripId);
+    
+    // Add to accepting set IMMEDIATELY to prevent double acceptance
+    setAcceptingTrips(prev => {
+      const newSet = new Set([...prev, sharedTripId]);
+      console.log('acceptingTrips now contains:', Array.from(newSet));
+      return newSet;
+    });
+    
+    // Immediately disable button for this specific trip
+    setAssignedTrips(prev => prev.map(tripItem => 
+      tripItem.tripId === sharedTripId 
+        ? { ...tripItem, accepted: true, status: 'ASSIGNED' }
+        : tripItem
+    ));
+    
+    // Mark trip as accepted IMMEDIATELY in state
+    setAssignedTrips(prev => prev.map(tripItem => 
+      tripItem.tripId === sharedTripId 
+        ? { ...tripItem, status: 'ASSIGNED', accepted: true, accepting: true }
+        : tripItem
+    ));
+    
+    // Send to server
     if (socket) {
       socket.emit('shared-trip-accept', {
         sharedTripId: sharedTripId,
@@ -146,27 +207,39 @@ export default function DriverApp() {
       });
     }
     
+    // Display fixed 800 SEK for merged orders - exactly Gothenburg Kommun requirement
+    if (earnings.currentOrderId === sharedTripId) {
+      Alert.alert('Varning', 'Du har redan accepterat denna order (800 SEK)');
+      return; // Skip duplicate
+    }
+    
+    setEarnings({
+      today: 800, // Fixed 800 SEK for merged orders
+      trips: 1,
+      currentOrderId: sharedTripId
+    });
+    
     Alert.alert('Framgång', 'Delad resa accepterad! Navigera till första upphämtningsplatsen.');
-    setEarnings(prev => ({
-      today: prev.today + 800,
-      trips: prev.trips + 1
-    }));
     
-    // Update trip status and remove from accepting set
-    setAssignedTrips(prev => prev.map(trip => 
-      trip.tripId === sharedTripId 
-        ? { ...trip, status: 'ASSIGNED', accepted: true }
-        : trip
-    ));
+    // Set this as the active trip
+    setActiveSharedTrip(sharedTripId);
+    setCurrentTripStatus('assigned');
     
-    // Remove from accepting set after a delay
+    // Clean up accepting state after 2 seconds
     setTimeout(() => {
       setAcceptingTrips(prev => {
         const newSet = new Set(prev);
         newSet.delete(sharedTripId);
+        console.log('Removed from accepting set:', sharedTripId);
         return newSet;
       });
-    }, 1000);
+      
+      setAssignedTrips(prev => prev.map(tripItem => 
+        tripItem.tripId === sharedTripId 
+          ? { ...tripItem, accepting: false }
+          : tripItem
+      ));
+    }, 2000);
   };
 
   const acceptTrip = (tripId) => {
@@ -186,10 +259,6 @@ export default function DriverApp() {
               });
             }
             Alert.alert('Framgång', 'Resa accepterad! Navigera till första upphämtningsplatsen.');
-            setEarnings(prev => ({
-              today: prev.today + 800,
-              trips: prev.trips + 1
-            }));
           }
         }
       ]
@@ -214,6 +283,146 @@ export default function DriverApp() {
               });
             }
             Alert.alert('Bekräftat', 'Upphämtning registrerad!');
+          }
+        }
+      ]
+    );
+  };
+
+  // New comprehensive status update functions
+  const confirmPickup = () => {
+    if (!activeSharedTrip || !socket) return;
+    
+    Alert.alert(
+      'Bekräfta upphämtning',
+      'Bekräfta att du är på väg för att hämta passagerarna.',
+      [
+        { text: 'Avbryt', style: 'cancel' },
+        { 
+          text: 'Bekräfta', 
+          onPress: () => {
+            socket.emit('driver-pickup-confirmed', {
+              sharedTripId: activeSharedTrip,
+              driverId: driverId,
+              estimatedArrival: '12:45',
+              driverInfo: vehicleInfo
+            });
+            
+            setCurrentTripStatus('pickup_confirmed');
+            
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '📍 Upphämtning bekräftad',
+                body: 'Passagerarna har informerats om att du är på väg.',
+              },
+              trigger: null,
+            });
+            
+            Alert.alert('Bekräftat', 'Passagerarna har fått besked att du är på väg!');
+          }
+        }
+      ]
+    );
+  };
+
+  const markArrived = () => {
+    if (!activeSharedTrip || !socket) return;
+    
+    Alert.alert(
+      'Ankomst',
+      'Har du anlänt vid upphämtningsplatsen?',
+      [
+        { text: 'Nej', style: 'cancel' },
+        { 
+          text: 'Ja, jag är här', 
+          onPress: () => {
+            socket.emit('driver-arrived', {
+              sharedTripId: activeSharedTrip,
+              driverId: driverId,
+              driverInfo: vehicleInfo
+            });
+            
+            setCurrentTripStatus('arrived');
+            
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '🚖 Ankomst registrerad',
+                body: 'Passagerarna har informerats om att du har anlänt.',
+              },
+              trigger: null,
+            });
+            
+            Alert.alert('Ankomst registrerad', 'Passagerarna vet att du är här!');
+          }
+        }
+      ]
+    );
+  };
+
+  const startTrip = () => {
+    if (!activeSharedTrip || !socket) return;
+    
+    Alert.alert(
+      'Starta resa',
+      'Har alla passagerare stigit på? Klar att starta resan?',
+      [
+        { text: 'Vänta', style: 'cancel' },
+        { 
+          text: 'Starta resa', 
+          onPress: () => {
+            socket.emit('trip-started', {
+              sharedTripId: activeSharedTrip,
+              driverId: driverId
+            });
+            
+            setCurrentTripStatus('in_progress');
+            
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '🛣️ Resa påbörjad',
+                body: 'Ha en säker resa till destinationen.',
+              },
+              trigger: null,
+            });
+            
+            Alert.alert('Resa påbörjad', 'Kör säkert till destinationen!');
+          }
+        }
+      ]
+    );
+  };
+
+  const completeTrip = () => {
+    if (!activeSharedTrip || !socket) return;
+    
+    Alert.alert(
+      'Avsluta resa',
+      'Har alla passagerare kommit fram till sina destinationer?',
+      [
+        { text: 'Inte än', style: 'cancel' },
+        { 
+          text: 'Resa avslutad', 
+          onPress: () => {
+            socket.emit('trip-completed', {
+              sharedTripId: activeSharedTrip,
+              driverId: driverId
+            });
+            
+            setCurrentTripStatus('completed');
+            setActiveSharedTrip(null);
+            
+            // Remove completed trip from list
+            setAssignedTrips(prev => prev.filter(trip => trip.tripId !== activeSharedTrip));
+            
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '✅ Resa avslutad',
+                body: 'Bra jobbat! Du är nu tillgänglig för nya resor.',
+              },
+              trigger: null,
+            });
+            
+            Alert.alert('Resa avslutad', 'Tack för en säker resa! Du är nu tillgänglig för nya uppdrag.');
           }
         }
       ]
@@ -267,18 +476,18 @@ export default function DriverApp() {
       </View>
 
       <View style={styles.tripActions}>
-        {!item.accepted ? (
+        {(!item.accepted && !acceptingTrips.has(item.tripId)) ? (
           <TouchableOpacity 
             style={styles.acceptButton}
             onPress={() => item.isSharedTrip ? acceptSharedTrip(item.tripId) : acceptTrip(item.tripId)}
           >
-            <Text style={styles.acceptButtonText}>
-              {acceptingTrips.has(item.tripId) ? '⏳ Accepterar...' : '✅ Acceptera'}
-            </Text>
+            <Text style={styles.acceptButtonText}>✅ Acceptera</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.acceptedButton}>
-            <Text style={styles.acceptedButtonText}>✅ Accepterad</Text>
+            <Text style={styles.acceptButtonText}>
+              {acceptingTrips.has(item.tripId) ? '⏳ Accepterad' : '✅ Accepterad'}
+            </Text>
           </View>
         )}
         
@@ -342,6 +551,48 @@ export default function DriverApp() {
         </Text>
       </View>
 
+      {/* Trip Status Control Section */}
+      {activeSharedTrip && (
+        <View style={styles.tripStatusSection}>
+          <Text style={styles.sectionTitle}>🚖 Aktiv resa - Status kontroll</Text>
+          <View style={styles.statusCard}>
+            <Text style={styles.activeTrip}>Delad resa #{activeSharedTrip}</Text>
+            <Text style={styles.tripStatus}>
+              Status: {currentTripStatus === 'assigned' ? '✅ Tilldelad' :
+                       currentTripStatus === 'pickup_confirmed' ? '📍 På väg' :
+                       currentTripStatus === 'arrived' ? '🚖 Anlänt' :
+                       currentTripStatus === 'in_progress' ? '🛣️ Pågår' : '⏳ Väntar...'}
+            </Text>
+            
+            <View style={styles.statusButtonsContainer}>
+              {currentTripStatus === 'assigned' && (
+                <TouchableOpacity style={styles.statusActionButton} onPress={confirmPickup}>
+                  <Text style={styles.statusActionText}>📍 Bekräfta upphämtning</Text>
+                </TouchableOpacity>
+              )}
+              
+              {currentTripStatus === 'pickup_confirmed' && (
+                <TouchableOpacity style={styles.statusActionButton} onPress={markArrived}>
+                  <Text style={styles.statusActionText}>🚖 Jag har anlänt</Text>
+                </TouchableOpacity>
+              )}
+              
+              {currentTripStatus === 'arrived' && (
+                <TouchableOpacity style={styles.statusActionButton} onPress={startTrip}>
+                  <Text style={styles.statusActionText}>🛣️ Starta resa</Text>
+                </TouchableOpacity>
+              )}
+              
+              {currentTripStatus === 'in_progress' && (
+                <TouchableOpacity style={[styles.statusActionButton, styles.completeButton]} onPress={completeTrip}>
+                  <Text style={styles.statusActionText}>✅ Avsluta resa</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      )}
+
       <View style={styles.tripsSection}>
         <Text style={styles.sectionTitle}>🎯 Tilldelade resor</Text>
         {assignedTrips.length > 0 || sampleTrips.length > 0 ? (
@@ -376,7 +627,7 @@ export default function DriverApp() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
   },
   header: {
     backgroundColor: '#059669',
@@ -543,6 +794,10 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
+  acceptButtonDisabled: {
+    backgroundColor: '#a0a0a0',
+    opacity: 0.6,
+  },
   acceptButtonText: {
     color: 'white',
     fontWeight: 'bold',
@@ -610,5 +865,38 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginBottom: 5,
     lineHeight: 18,
+  },
+  // Trip status control styles
+  tripStatusSection: {
+    margin: 15,
+  },
+  activeTrip: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#059669',
+    marginBottom: 5,
+  },
+  tripStatus: {
+    fontSize: 14,
+    color: '#374151',
+    marginBottom: 15,
+  },
+  statusButtonsContainer: {
+    marginTop: 10,
+  },
+  statusActionButton: {
+    backgroundColor: '#2563eb',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  completeButton: {
+    backgroundColor: '#059669',
+  },
+  statusActionText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
